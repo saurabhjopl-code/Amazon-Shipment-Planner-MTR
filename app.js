@@ -48,10 +48,10 @@ function handleFile(event, type) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const rows = parseCSV(reader.result);
-      const headers = normalizeHeaders(rows[0]);
+      const parsed = parseCSV(reader.result);
+      const headers = parsed.headers;
       validateHeaders(headers, REQUIRED_HEADERS[type]);
-      state[type] = rows;
+      state[type] = parsed.rows;
       statusEl.textContent = "Validated";
       statusEl.className = "status valid";
       log(`${type.toUpperCase()} file validated`);
@@ -73,10 +73,9 @@ fetch("data/sku_mapping.csv")
     return res.text();
   })
   .then(text => {
-    const rows = parseCSV(text);
-    const headers = normalizeHeaders(rows[0]);
-    validateHeaders(headers, REQUIRED_HEADERS.mapping);
-    state.mapping = rows;
+    const parsed = parseCSV(text);
+    validateHeaders(parsed.headers, REQUIRED_HEADERS.mapping);
+    state.mapping = parsed.rows;
     log("SKU Mapping loaded & validated");
     checkAllValidated();
   })
@@ -84,24 +83,33 @@ fetch("data/sku_mapping.csv")
     log("SKU Mapping error: " + err.message);
   });
 
-// ================= CSV PARSER =================
+// ================= CSV PARSER (AUTO DELIMITER) =================
 function parseCSV(text) {
-  return text
-    .replace(/^\uFEFF/, "") // remove BOM
-    .trim()
-    .split("\n")
-    .map(line =>
-      line.split(",").map(cell =>
-        cell.replace(/^"|"$/g, "").trim()
-      )
-    );
+  text = text.replace(/^\uFEFF/, "").trim();
+
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) throw new Error("Empty file");
+
+  const delimiter = detectDelimiter(lines[0]);
+
+  const headers = lines[0]
+    .split(delimiter)
+    .map(h => h.replace(/^"|"$/g, "").trim());
+
+  const rows = lines.slice(1).map(line =>
+    line.split(delimiter).map(cell =>
+      cell.replace(/^"|"$/g, "").trim()
+    )
+  );
+
+  return { headers, rows };
 }
 
-// ================= HEADER NORMALIZATION =================
-function normalizeHeaders(headers) {
-  return headers.map(h =>
-    h.replace(/^\uFEFF/, "").trim()
-  );
+// ================= DELIMITER DETECTION =================
+function detectDelimiter(headerLine) {
+  if (headerLine.includes("\t")) return "\t";
+  if (headerLine.includes(";")) return ";";
+  return ","; // fallback
 }
 
 // ================= HEADER VALIDATION =================
