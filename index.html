@@ -7,36 +7,37 @@
 </head>
 <body>
 
-  <div class="app-container">
-    <h1>Amazon Shipment Planning WebApp</h1>
+<div class="app-container">
+  <h1>Amazon Shipment Planning WebApp</h1>
 
-    <div class="upload-section">
-
-      <div class="upload-card">
-        <label>30D Sale File</label>
-        <input type="file" id="saleFile" accept=".csv">
-        <span class="status" id="saleStatus">Not uploaded</span>
-      </div>
-
-      <div class="upload-card">
-        <label>FBA Stock File</label>
-        <input type="file" id="fbaFile" accept=".csv">
-        <span class="status" id="fbaStatus">Not uploaded</span>
-      </div>
-
-      <div class="upload-card">
-        <label>Uniware Stock File</label>
-        <input type="file" id="uniwareFile" accept=".csv">
-        <span class="status" id="uniwareStatus">Not uploaded</span>
-      </div>
-
+  <div class="upload-section">
+    <div class="upload-card">
+      <label>30D Sale File</label>
+      <input type="file" id="saleFile" accept=".csv">
+      <span class="status" id="saleStatus">Not uploaded</span>
     </div>
 
-    <button id="generateBtn" disabled>Generate Report</button>
+    <div class="upload-card">
+      <label>FBA Stock File</label>
+      <input type="file" id="fbaFile" accept=".csv">
+      <span class="status" id="fbaStatus">Not uploaded</span>
+    </div>
 
-    <pre id="logBox"></pre>
+    <div class="upload-card">
+      <label>Uniware Stock File</label>
+      <input type="file" id="uniwareFile" accept=".csv">
+      <span class="status" id="uniwareStatus">Not uploaded</span>
+    </div>
   </div>
 
-  <script src="app.js"></script>
+  <button id="generateBtn" disabled>Generate Report</button>
+
+  <div id="fcTabs"></div>
+  <div id="fcContent"></div>
+
+  <pre id="logBox"></pre>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
