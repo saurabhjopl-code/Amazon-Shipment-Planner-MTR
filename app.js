@@ -7,7 +7,7 @@ const state = {
   working: []
 };
 
-// ================= REQUIRED HEADERS =================
+// ================= REQUIRED HEADERS (LOCKED) =================
 const REQUIRED_HEADERS = {
   sale: ["Transaction Type","Sku","Quantity","Warehouse Id"],
   fba: ["Date","MSKU","Disposition","Ending Warehouse Balance","Location"],
@@ -15,31 +15,31 @@ const REQUIRED_HEADERS = {
   mapping: ["Amazon Seller SKU","Uniware SKU"]
 };
 
-// ================= EVENT BINDINGS =================
+// ================= EVENTS =================
 document.getElementById("saleFile").addEventListener("change", e => loadFile(e,"sale"));
 document.getElementById("fbaFile").addEventListener("change", e => loadFile(e,"fba"));
 document.getElementById("uniwareFile").addEventListener("change", e => loadFile(e,"uniware"));
 document.getElementById("generateBtn").addEventListener("click", generateReport);
 
-// ================= FILE LOAD =================
+// ================= LOAD FILE =================
 function loadFile(e,type){
-  const file = e.target.files[0];
-  if (!file) return;
+  const file=e.target.files[0];
+  if(!file) return;
 
   const reader=new FileReader();
   reader.onload=()=>{
-    try {
+    try{
       const parsed=parseCSV(reader.result);
       validateHeaders(parsed.headers,REQUIRED_HEADERS[type]);
       state[type]=parsed;
 
-      const statusEl = document.getElementById(type+"Status");
-      statusEl.textContent="Validated";
-      statusEl.className="status valid";
+      const s=document.getElementById(type+"Status");
+      s.textContent="Validated";
+      s.className="status valid";
 
       log(type.toUpperCase()+" validated");
       checkReady();
-    } catch (err) {
+    }catch(err){
       state[type]=null;
       log(err.message);
     }
@@ -47,7 +47,7 @@ function loadFile(e,type){
   reader.readAsText(file);
 }
 
-// ================= SKU MAP =================
+// ================= LOAD SKU MAPPING =================
 fetch("data/sku_mapping.csv")
   .then(r=>r.text())
   .then(t=>{
@@ -58,31 +58,45 @@ fetch("data/sku_mapping.csv")
     checkReady();
   });
 
-// ================= CSV =================
+// ================= CSV PARSER (FINAL) =================
 function parseCSV(text){
   text=text.replace(/^\uFEFF/,"").trim();
   const lines=text.split(/\r?\n/);
   const d=lines[0].includes("\t")?"\t":lines[0].includes(";")?";":",";
-  const headers=lines[0].split(d).map(h=>h.trim());
-  const rows=lines.slice(1).map(l=>l.split(d).map(c=>c.trim()));
-  const index={}; headers.forEach((h,i)=>index[h]=i);
+
+  const rawHeaders=lines[0].split(d);
+  const headers=rawHeaders.map(h=>normalize(h));
+
+  const rows=lines.slice(1).map(l=>
+    l.split(d).map(v=>normalize(v))
+  );
+
+  const index={};
+  headers.forEach((h,i)=>index[h]=i);
+
   return {headers,rows,index};
 }
 
-function validateHeaders(h,r){r.forEach(x=>{if(!h.includes(x))throw Error("Missing header "+x);});}
-
-// ================= BUTTON ENABLE (RESTORED) =================
-function checkReady(){
-  const ready = !!(
-    state.sale &&
-    state.fba &&
-    state.uniware &&
-    state.mapping
-  );
-  document.getElementById("generateBtn").disabled = !ready;
+function normalize(v){
+  return v.replace(/^"|"$/g,"").replace(/^\uFEFF/,"").trim();
 }
 
-// ================= PHASE 3 + 4 (UNCHANGED LOGIC) =================
+// ================= VALIDATION =================
+function validateHeaders(headers,required){
+  required.forEach(h=>{
+    if(!headers.includes(h)){
+      throw new Error("Missing header "+h);
+    }
+  });
+}
+
+function checkReady(){
+  document.getElementById("generateBtn").disabled = !(
+    state.sale && state.fba && state.uniware && state.mapping
+  );
+}
+
+// ================= REPORT (PHASE 3 + 4, UNCHANGED) =================
 function generateReport(){
   document.getElementById("fcTabs").innerHTML="";
   document.getElementById("fcContent").innerHTML="";
@@ -114,8 +128,8 @@ function generateReport(){
   });
 
   const parseDate=d=>{
-    const[x,y,z]=d.split("-");
-    return new Date(`${z}-${y}-${x}`).getTime();
+    const[a,b,c]=d.split("-");
+    return new Date(`${c}-${b}-${a}`).getTime();
   };
   const f=state.fba;
   const latest=Math.max(...f.rows.map(r=>parseDate(r[f.index["Date"]])));
