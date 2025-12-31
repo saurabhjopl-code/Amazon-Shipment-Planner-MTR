@@ -1,5 +1,5 @@
 // ==================================================
-// GLOBAL STATE (PHASE 1 + PHASE 2)
+// GLOBAL STATE
 // ==================================================
 const state = {
   sale: null,
@@ -10,7 +10,7 @@ const state = {
 };
 
 // ==================================================
-// REQUIRED HEADERS (LOCKED)
+// REQUIRED HEADERS (GLOBAL TRUTH – LOCKED)
 // ==================================================
 const REQUIRED_HEADERS = {
   sale: [
@@ -39,7 +39,7 @@ const REQUIRED_HEADERS = {
 };
 
 // ==================================================
-// FILE INPUT HANDLERS
+// FILE HANDLERS
 // ==================================================
 document.getElementById("saleFile").addEventListener("change", e => handleFile(e, "sale"));
 document.getElementById("fbaFile").addEventListener("change", e => handleFile(e, "fba"));
@@ -66,9 +66,9 @@ function handleFile(event, type) {
       log(`${type.toUpperCase()} validated`);
       checkAllValidated();
     } catch (err) {
+      state[type] = null;
       statusEl.textContent = err.message;
       statusEl.className = "status error";
-      state[type] = null;
       log(err.message);
     }
   };
@@ -76,7 +76,7 @@ function handleFile(event, type) {
 }
 
 // ==================================================
-// LOAD SKU MAPPING (STATIC)
+// LOAD SKU MAPPING (STATIC, NORMALIZED)
 // ==================================================
 fetch("data/sku_mapping.csv")
   .then(res => res.text())
@@ -89,16 +89,21 @@ fetch("data/sku_mapping.csv")
   });
 
 // ==================================================
-// CSV PARSER (AUTO DELIMITER)
+// ROBUST CSV PARSER (FINAL, IMMUTABLE)
 // ==================================================
 function parseCSV(text) {
   text = text.replace(/^\uFEFF/, "").trim();
   const lines = text.split(/\r?\n/);
+  if (!lines.length) throw new Error("Empty file");
+
   const delimiter = detectDelimiter(lines[0]);
 
-  const headers = lines[0].split(delimiter).map(h => h.trim());
-  const rows = lines.slice(1).map(l =>
-    l.split(delimiter).map(c => c.trim())
+  const headers = normalize(
+    lines[0].split(delimiter)
+  );
+
+  const rows = lines.slice(1).map(line =>
+    normalize(line.split(delimiter))
   );
 
   return { headers, rows };
@@ -110,8 +115,17 @@ function detectDelimiter(line) {
   return ",";
 }
 
+function normalize(arr) {
+  return arr.map(v =>
+    v
+      .replace(/^"|"$/g, "")
+      .replace(/^\uFEFF/, "")
+      .trim()
+  );
+}
+
 // ==================================================
-// VALIDATION
+// HEADER VALIDATION
 // ==================================================
 function validateHeaders(headers, required) {
   required.forEach(h => {
@@ -121,6 +135,9 @@ function validateHeaders(headers, required) {
   });
 }
 
+// ==================================================
+// ENABLE BUTTON
+// ==================================================
 function checkAllValidated() {
   document.getElementById("generateBtn").disabled = !(
     state.sale &&
@@ -131,85 +148,68 @@ function checkAllValidated() {
 }
 
 // ==================================================
-// PHASE 2 – CORE AGGREGATION
+// PHASE 2 AGGREGATION (UNCHANGED)
 // ==================================================
 function generateAggregation() {
-  log("Starting Phase 2 aggregation...");
+  log("Phase 2 aggregation started");
 
   const skuMap = {};
-  state.mapping.forEach(r => {
-    skuMap[r[0]] = r[1];
-  });
+  state.mapping.forEach(r => skuMap[r[0]] = r[1]);
 
   const uniwareStock = {};
-  state.uniware.forEach(r => {
-    uniwareStock[r[0]] = Number(r[1]) || 0;
-  });
+  state.uniware.forEach(r => uniwareStock[r[0]] = Number(r[1]) || 0);
 
-  const salesAgg = {};
-  const returnAgg = {};
+  const sales = {};
+  const returns = {};
 
   state.sale.forEach(r => {
     const txn = r[0];
     const sku = r[1];
     const qty = Number(r[2]) || 0;
     const fc = r[5];
-
-    const key = sku + "||" + fc;
+    const key = `${sku}||${fc}`;
 
     if (txn === "Shipment" || txn === "FreeReplacement") {
-      salesAgg[key] = (salesAgg[key] || 0) + qty;
+      sales[key] = (sales[key] || 0) + qty;
     }
-
     if (txn === "Refund") {
-      returnAgg[key] = (returnAgg[key] || 0) + qty;
+      returns[key] = (returns[key] || 0) + qty;
     }
   });
 
-  const latestDate = Math.max(
-    ...state.fba.map(r => new Date(r[0]).getTime())
-  );
+  const latestDate = Math.max(...state.fba.map(r => new Date(r[0]).getTime()));
+  const fba = {};
 
-  const fbaAgg = {};
   state.fba.forEach(r => {
-    const date = new Date(r[0]).getTime();
-    const sku = r[1];
-    const disp = r[2];
-    const stock = Number(r[3]) || 0;
-    const fc = r[4];
+    if (new Date(r[0]).getTime() !== latestDate) return;
+    if (r[2] !== "SELLABLE") return;
 
-    if (date !== latestDate) return;
-    if (disp !== "SELLABLE") return;
-
-    const key = sku + "||" + fc;
-    fbaAgg[key] = (fbaAgg[key] || 0) + stock;
+    const key = `${r[1]}||${r[4]}`;
+    fba[key] = (fba[key] || 0) + (Number(r[3]) || 0);
   });
 
   state.working = [];
 
-  Object.keys(fbaAgg).forEach(key => {
+  Object.keys(fba).forEach(key => {
     const [sku, fc] = key.split("||");
-    const sale = salesAgg[key] || 0;
-    const ret = returnAgg[key] || 0;
-    const stock = fbaAgg[key] || 0;
+    const sale = sales[key] || 0;
+    const ret = returns[key] || 0;
+    const stock = fba[key];
 
     if (sale === 0 && stock === 0) return;
-
-    const drr = sale / 30;
-    const returnPct = sale + ret > 0 ? (ret / (sale + ret)) * 100 : 0;
 
     state.working.push({
       sku,
       fc,
-      fcStock: stock,
-      uniwareStock: uniwareStock[skuMap[sku]] || 0,
       sale30d: sale,
-      drr,
-      returnPct
+      drr: sale / 30,
+      returnPct: sale + ret ? (ret / (sale + ret)) * 100 : 0,
+      fcStock: stock,
+      uniwareStock: uniwareStock[skuMap[sku]] || 0
     });
   });
 
-  log(`Phase 2 completed. Records generated: ${state.working.length}`);
+  log(`Phase 2 completed: ${state.working.length} rows`);
   console.table(state.working);
 }
 
