@@ -25,7 +25,6 @@ document.getElementById("generateBtn").addEventListener("click", generateReport)
 function loadFile(e,type){
   const file = e.target.files[0];
   const statusEl = document.getElementById(type+"Status");
-
   if (!file) return;
 
   const reader = new FileReader();
@@ -77,11 +76,9 @@ function checkReady(){
   );
 }
 
-// ================= FULL REPORT PIPELINE =================
+// ================= REPORT PIPELINE =================
 function generateReport(){
-  log("Generate Report clicked");
-  state.working = [];
-
+  state.working=[];
   const skuMap={}, uniwareStock={}, sales={}, returns={}, fba={};
 
   state.mapping.rows.forEach(r=>{
@@ -100,17 +97,11 @@ function generateReport(){
     const qty=Number(r[state.sale.index["Quantity"]])||0;
     const fc=r[state.sale.index["Warehouse Id"]];
     const k=sku+"||"+fc;
-
-    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement"))
-      sales[k]=(sales[k]||0)+qty;
-    if(txn.startsWith("Refund"))
-      returns[k]=(returns[k]||0)+qty;
+    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement")) sales[k]=(sales[k]||0)+qty;
+    if(txn.startsWith("Refund")) returns[k]=(returns[k]||0)+qty;
   });
 
-  const parseDate=d=>{
-    const[a,b,c]=d.split("-");
-    return new Date(`${c}-${b}-${a}`).getTime();
-  };
+  const parseDate=d=>{const[a,b,c]=d.split("-");return new Date(`${c}-${b}-${a}`).getTime();};
   const f=state.fba;
   const latest=Math.max(...f.rows.map(r=>parseDate(r[f.index["Date"]])));
 
@@ -124,7 +115,6 @@ function generateReport(){
   });
 
   const keys=new Set([...Object.keys(sales),...Object.keys(returns),...Object.keys(fba)]);
-
   keys.forEach(k=>{
     const [sku,fc]=k.split("||");
     const sale=sales[k]||0;
@@ -188,8 +178,10 @@ function showFC(fc,groups){
   let limit=25;
   const c=document.getElementById("fcContent");
 
+  const summary = buildSummary(rows);
+
   const render=()=>{
-    c.innerHTML=buildTable(rows.slice(0,limit));
+    c.innerHTML = summary + buildTable(rows.slice(0,limit));
     if(limit<rows.length){
       const b=document.createElement("button");
       b.textContent="Load More";
@@ -199,6 +191,40 @@ function showFC(fc,groups){
     }
   };
   render();
+}
+
+// ================= SUMMARY =================
+function buildSummary(rows){
+  const totalStock = rows.reduce((a,r)=>a+r.stock,0);
+  const totalUW = rows.reduce((a,r)=>a+r.uw,0);
+  const totalSale = rows.reduce((a,r)=>a+r.sale,0);
+  const totalSend = rows.reduce((a,r)=>a+r.send,0);
+  const totalRecall = rows.reduce((a,r)=>a+r.recall,0);
+
+  const drr = totalSale/30;
+  const sc = drr ? totalStock/drr : 0;
+
+  return `
+  <table class="summary-table">
+    <tr>
+      <th>Current FC Stock</th>
+      <th>Uniware Stock</th>
+      <th>30D Sale</th>
+      <th>DRR</th>
+      <th>Stock Cover</th>
+      <th>SEND QTY</th>
+      <th>RECALL QTY</th>
+    </tr>
+    <tr>
+      <td>${totalStock}</td>
+      <td>${totalUW}</td>
+      <td>${totalSale}</td>
+      <td>${drr.toFixed(2)}</td>
+      <td>${sc.toFixed(1)}</td>
+      <td>${totalSend}</td>
+      <td>${totalRecall}</td>
+    </tr>
+  </table>`;
 }
 
 function buildTable(rows){
