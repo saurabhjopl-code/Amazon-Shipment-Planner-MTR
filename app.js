@@ -10,15 +10,13 @@ const state = {
 };
 
 // ==================================================
-// REQUIRED HEADERS (LOCKED)
+// REQUIRED HEADERS (LOCKED GLOBAL TRUTH)
 // ==================================================
 const REQUIRED_HEADERS = {
   sale: [
     "Transaction Type",
     "Sku",
     "Quantity",
-    "Ship To State",
-    "Fulfillment Channel",
     "Warehouse Id"
   ],
   fba: [
@@ -56,7 +54,7 @@ function handleFile(event, type) {
     try {
       const parsed = parseCSV(reader.result);
       validateHeaders(parsed.headers, REQUIRED_HEADERS[type]);
-      state[type] = parsed.rows;
+      state[type] = parsed;
       statusEl.textContent = "Validated";
       statusEl.className = "status valid";
       log(`${type.toUpperCase()} validated`);
@@ -79,7 +77,7 @@ fetch("data/sku_mapping.csv")
   .then(t => {
     const p = parseCSV(t);
     validateHeaders(p.headers, REQUIRED_HEADERS.mapping);
-    state.mapping = p.rows;
+    state.mapping = p;
     log("SKU Mapping loaded");
     checkAllValidated();
   });
@@ -92,10 +90,13 @@ function parseCSV(text) {
   const lines = text.split(/\r?\n/);
   const d = detectDelimiter(lines[0]);
 
-  return {
-    headers: normalize(lines[0].split(d)),
-    rows: lines.slice(1).map(l => normalize(l.split(d)))
-  };
+  const headers = normalize(lines[0].split(d));
+  const rows = lines.slice(1).map(l => normalize(l.split(d)));
+
+  const index = {};
+  headers.forEach((h, i) => index[h] = i);
+
+  return { headers, rows, index };
 }
 
 function detectDelimiter(l) {
@@ -122,25 +123,20 @@ function checkAllValidated() {
 }
 
 // ==================================================
-// 🔥 PHASE 2 – FINAL, CORRECT AGGREGATION
+// ✅ PHASE 2 – CORRECT AGGREGATION (HEADER-BASED)
 // ==================================================
 function generateAggregation() {
   log("Phase 2 aggregation started");
 
-  const skuMap = {};
-  state.mapping.forEach(r => skuMap[r[0]] = r[1]);
-
-  const uniwareStock = {};
-  state.uniware.forEach(r => uniwareStock[r[0]] = Number(r[1]) || 0);
-
   const sales = {};
   const returns = {};
 
-  state.sale.forEach(r => {
-    const txn = r[0];
-    const sku = r[1];
-    const qty = Number(r[2]) || 0;
-    const fc = r[5];
+  const s = state.sale;
+  s.rows.forEach(r => {
+    const txn = r[s.index["Transaction Type"]];
+    const sku = r[s.index["Sku"]];
+    const qty = Number(r[s.index["Quantity"]]) || 0;
+    const fc = r[s.index["Warehouse Id"]] || "UNKNOWN";
     const key = `${sku}||${fc}`;
 
     if (txn.startsWith("Shipment") || txn.startsWith("FreeReplacement")) {
@@ -151,28 +147,37 @@ function generateAggregation() {
     }
   });
 
-  // parse DD-MM-YYYY safely
   const parseDate = d => {
     const [dd, mm, yy] = d.split("-");
     return new Date(`${yy}-${mm}-${dd}`).getTime();
   };
 
-  const latestDate = Math.max(...state.fba.map(r => parseDate(r[0])));
+  const f = state.fba;
+  const latestDate = Math.max(...f.rows.map(r => parseDate(r[f.index["Date"]])));
+
   const fba = {};
+  f.rows.forEach(r => {
+    if (parseDate(r[f.index["Date"]]) !== latestDate) return;
+    if (r[f.index["Disposition"]] !== "SELLABLE") return;
 
-  state.fba.forEach(r => {
-    if (parseDate(r[0]) !== latestDate) return;
-    if (r[2] !== "SELLABLE") return;
-
-    const key = `${r[1]}||${r[4]}`;
-    fba[key] = (fba[key] || 0) + (Number(r[3]) || 0);
+    const sku = r[f.index["MSKU"]];
+    const fc = r[f.index["Location"]];
+    const stock = Number(r[f.index["Ending Warehouse Balance"]]) || 0;
+    const key = `${sku}||${fc}`;
+    fba[key] = (fba[key] || 0) + stock;
   });
 
-  const allKeys = new Set([
-    ...Object.keys(sales),
-    ...Object.keys(returns),
-    ...Object.keys(fba)
-  ]);
+  const u = state.uniware;
+  const uniwareStock = {};
+  u.rows.forEach(r => {
+    uniwareStock[r[u.index["Sku Code"]]] = Number(r[u.index["Total Inventory"]]) || 0;
+  });
+
+  const m = state.mapping;
+  const skuMap = {};
+  m.rows.forEach(r => skuMap[r[m.index["Amazon Seller SKU"]]] = r[m.index["Uniware SKU"]]);
+
+  const allKeys = new Set([...Object.keys(sales), ...Object.keys(returns), ...Object.keys(fba)]);
 
   state.working = [];
 
