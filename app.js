@@ -15,7 +15,7 @@ const REQUIRED_HEADERS = {
   mapping: ["Amazon Seller SKU","Uniware SKU"]
 };
 
-// ================= FILE HANDLERS =================
+// ================= EVENT BINDINGS =================
 document.getElementById("saleFile").addEventListener("change", e => loadFile(e,"sale"));
 document.getElementById("fbaFile").addEventListener("change", e => loadFile(e,"fba"));
 document.getElementById("uniwareFile").addEventListener("change", e => loadFile(e,"uniware"));
@@ -23,27 +23,40 @@ document.getElementById("generateBtn").addEventListener("click", generateReport)
 
 // ================= FILE LOAD =================
 function loadFile(e,type){
-  const r=new FileReader();
-  r.onload=()=>{
-    const p=parseCSV(r.result);
-    validateHeaders(p.headers,REQUIRED_HEADERS[type]);
-    state[type]=p;
-    document.getElementById(type+"Status").textContent="Validated";
-    document.getElementById(type+"Status").className="status valid";
-    log(type.toUpperCase()+" validated");
-    checkReady();
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try {
+      const parsed=parseCSV(reader.result);
+      validateHeaders(parsed.headers,REQUIRED_HEADERS[type]);
+      state[type]=parsed;
+
+      const statusEl = document.getElementById(type+"Status");
+      statusEl.textContent="Validated";
+      statusEl.className="status valid";
+
+      log(type.toUpperCase()+" validated");
+      checkReady();
+    } catch (err) {
+      state[type]=null;
+      log(err.message);
+    }
   };
-  r.readAsText(e.target.files[0]);
+  reader.readAsText(file);
 }
 
 // ================= SKU MAP =================
-fetch("data/sku_mapping.csv").then(r=>r.text()).then(t=>{
-  const p=parseCSV(t);
-  validateHeaders(p.headers,REQUIRED_HEADERS.mapping);
-  state.mapping=p;
-  log("SKU Mapping loaded");
-  checkReady();
-});
+fetch("data/sku_mapping.csv")
+  .then(r=>r.text())
+  .then(t=>{
+    const p=parseCSV(t);
+    validateHeaders(p.headers,REQUIRED_HEADERS.mapping);
+    state.mapping=p;
+    log("SKU Mapping loaded");
+    checkReady();
+  });
 
 // ================= CSV =================
 function parseCSV(text){
@@ -57,19 +70,35 @@ function parseCSV(text){
 }
 
 function validateHeaders(h,r){r.forEach(x=>{if(!h.includes(x))throw Error("Missing header "+x);});}
+
+// ================= BUTTON ENABLE (RESTORED) =================
 function checkReady(){
-  document.getElementById("generateBtn").disabled=!(
-    state.sale&&state.fba&&state.uniware&&state.mapping
+  const ready = !!(
+    state.sale &&
+    state.fba &&
+    state.uniware &&
+    state.mapping
   );
+  document.getElementById("generateBtn").disabled = !ready;
 }
 
-// ================= PHASE 3 + 4 =================
+// ================= PHASE 3 + 4 (UNCHANGED LOGIC) =================
 function generateReport(){
+  document.getElementById("fcTabs").innerHTML="";
+  document.getElementById("fcContent").innerHTML="";
   state.working=[];
+
   const skuMap={}, uniwareStock={}, sales={}, returns={}, fba={};
 
-  state.mapping.rows.forEach(r=>skuMap[r[state.mapping.index["Amazon Seller SKU"]]]=r[state.mapping.index["Uniware SKU"]]);
-  state.uniware.rows.forEach(r=>uniwareStock[r[state.uniware.index["Sku Code"]]]=Number(r[state.uniware.index["Total Inventory"]])||0);
+  state.mapping.rows.forEach(r=>{
+    skuMap[r[state.mapping.index["Amazon Seller SKU"]]] =
+      r[state.mapping.index["Uniware SKU"]];
+  });
+
+  state.uniware.rows.forEach(r=>{
+    uniwareStock[r[state.uniware.index["Sku Code"]]] =
+      Number(r[state.uniware.index["Total Inventory"]])||0;
+  });
 
   state.sale.rows.forEach(r=>{
     const txn=r[state.sale.index["Transaction Type"]];
@@ -77,11 +106,17 @@ function generateReport(){
     const qty=Number(r[state.sale.index["Quantity"]])||0;
     const fc=r[state.sale.index["Warehouse Id"]];
     const k=sku+"||"+fc;
-    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement")) sales[k]=(sales[k]||0)+qty;
-    if(txn.startsWith("Refund")) returns[k]=(returns[k]||0)+qty;
+
+    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement"))
+      sales[k]=(sales[k]||0)+qty;
+    if(txn.startsWith("Refund"))
+      returns[k]=(returns[k]||0)+qty;
   });
 
-  const parseDate=d=>{const[x,y,z]=d.split("-");return new Date(`${z}-${y}-${x}`).getTime();};
+  const parseDate=d=>{
+    const[x,y,z]=d.split("-");
+    return new Date(`${z}-${y}-${x}`).getTime();
+  };
   const f=state.fba;
   const latest=Math.max(...f.rows.map(r=>parseDate(r[f.index["Date"]])));
 
@@ -133,39 +168,40 @@ function renderFCTabs(){
   const content=document.getElementById("fcContent");
   tabs.innerHTML=""; content.innerHTML="";
 
-  const fcGroups={};
+  const groups={};
   state.working.forEach(r=>{
-    fcGroups[r.fc]=fcGroups[r.fc]||[];
-    fcGroups[r.fc].push(r);
+    groups[r.fc]=groups[r.fc]||[];
+    groups[r.fc].push(r);
   });
 
-  Object.keys(fcGroups).forEach((fc,i)=>{
-    const tab=document.createElement("div");
-    tab.className="fc-tab"+(i===0?" active":"");
-    tab.textContent=fc;
-    tab.onclick=()=>showFC(fc,fcGroups);
-    tabs.appendChild(tab);
+  Object.keys(groups).forEach((fc,i)=>{
+    const t=document.createElement("div");
+    t.className="fc-tab"+(i===0?" active":"");
+    t.textContent=fc;
+    t.onclick=()=>showFC(fc,groups);
+    tabs.appendChild(t);
   });
 
-  showFC(Object.keys(fcGroups)[0],fcGroups);
+  showFC(Object.keys(groups)[0],groups);
 }
 
 function showFC(fc,groups){
-  document.querySelectorAll(".fc-tab").forEach(t=>t.classList.toggle("active",t.textContent===fc));
+  document.querySelectorAll(".fc-tab").forEach(t=>{
+    t.classList.toggle("active",t.textContent===fc);
+  });
+
   const rows=groups[fc];
   let limit=25;
-
-  const container=document.getElementById("fcContent");
-  container.innerHTML="";
+  const c=document.getElementById("fcContent");
 
   const render=()=>{
-    container.innerHTML=buildTable(rows.slice(0,limit));
+    c.innerHTML=buildTable(rows.slice(0,limit));
     if(limit<rows.length){
       const b=document.createElement("button");
       b.textContent="Load More";
       b.className="load-btn";
       b.onclick=()=>{limit+=25;render();};
-      container.appendChild(b);
+      c.appendChild(b);
     }
   };
   render();
@@ -173,17 +209,34 @@ function showFC(fc,groups){
 
 function buildTable(rows){
   let h=`<table><tr>
-  <th>Amazon Seller SKU</th><th>Current FC Stock</th><th>Uniware Stock</th>
-  <th>30D Sale</th><th>DRR</th><th>Stock Cover</th>
-  <th>Decision</th><th>Send Qty</th><th>Recall Qty</th><th>Remarks</th></tr>`;
+    <th>Amazon Seller SKU</th>
+    <th>Current FC Stock</th>
+    <th>Uniware Stock</th>
+    <th>30D Sale</th>
+    <th>DRR</th>
+    <th>Stock Cover</th>
+    <th>Decision</th>
+    <th>Send Qty</th>
+    <th>Recall Qty</th>
+    <th>Remarks</th>
+  </tr>`;
   rows.forEach(r=>{
     h+=`<tr>
-    <td>${r.sku}</td><td>${r.stock}</td><td>${r.uw}</td>
-    <td>${r.sale}</td><td>${r.drr.toFixed(2)}</td><td>${r.sc.toFixed(1)}</td>
-    <td>${r.decision}</td><td>${r.send}</td><td>${r.recall}</td><td>${r.remarks}</td>
+      <td>${r.sku}</td>
+      <td>${r.stock}</td>
+      <td>${r.uw}</td>
+      <td>${r.sale}</td>
+      <td>${r.drr.toFixed(2)}</td>
+      <td>${r.sc.toFixed(1)}</td>
+      <td>${r.decision}</td>
+      <td>${r.send}</td>
+      <td>${r.recall}</td>
+      <td>${r.remarks}</td>
     </tr>`;
   });
   return h+"</table>";
 }
 
-function log(m){document.getElementById("logBox").textContent+=m+"\n";}
+function log(m){
+  document.getElementById("logBox").textContent+=m+"\n";
+}
