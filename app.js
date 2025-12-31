@@ -1,94 +1,113 @@
-/* ===========================
-   (PHASE 1–4 CODE UNCHANGED)
-   =========================== */
+// ================= GLOBAL STATE =================
+const state = {
+  sale: null,
+  fba: null,
+  uniware: null,
+  mapping: null,
+  working: []
+};
 
-/* ⬆⬆⬆
-   KEEP EVERYTHING YOU HAVE
-   FROM PHASE 4 EXACTLY SAME
-   ⬆⬆⬆ */
+// ================= REQUIRED HEADERS =================
+const REQUIRED_HEADERS = {
+  sale: ["Transaction Type","Sku","Quantity","Warehouse Id"],
+  fba: ["Date","MSKU","Disposition","Ending Warehouse Balance","Location"],
+  uniware: ["Sku Code","Total Inventory"],
+  mapping: ["Amazon Seller SKU","Uniware SKU"]
+};
 
-// ==================================================
-// EXPORT BUTTONS
-// ==================================================
-document.getElementById("exportShipmentBtn").onclick = () =>
-  exportCSV("shipment", r => r.decision === "SEND" && r.send > 0);
+// ================= EVENTS =================
+document.getElementById("saleFile").addEventListener("change", e => loadFile(e,"sale"));
+document.getElementById("fbaFile").addEventListener("change", e => loadFile(e,"fba"));
+document.getElementById("uniwareFile").addEventListener("change", e => loadFile(e,"uniware"));
+document.getElementById("generateBtn").addEventListener("click", generateReport);
 
-document.getElementById("exportRecallBtn").onclick = () =>
-  exportCSV("recall", r => r.recall > 0);
+// ================= LOAD FILE (FIXED) =================
+function loadFile(e,type){
+  const file = e.target.files[0];
+  const statusEl = document.getElementById(type+"Status");
 
-document.getElementById("exportAllBtn").onclick = () =>
-  exportCSV("full", () => true);
-
-// ==================================================
-// ENABLE EXPORTS AFTER REPORT
-// ==================================================
-function enableExports() {
-  document.getElementById("exportShipmentBtn").disabled = false;
-  document.getElementById("exportRecallBtn").disabled = false;
-  document.getElementById("exportAllBtn").disabled = false;
-}
-
-// Call this at END of generateReport()
-/* ADD THIS LINE AT VERY END OF generateReport():
-   enableExports();
-*/
-
-// ==================================================
-// CSV EXPORT CORE (LOCKED)
-// ==================================================
-function exportCSV(type, filterFn) {
-  const rows = state.working.filter(filterFn);
-  if (!rows.length) {
-    alert("No data to export");
+  if (!file) {
+    statusEl.textContent = "Not uploaded";
+    statusEl.className = "status";
+    state[type] = null;
+    checkReady();
     return;
   }
 
-  const headers = [
-    "Amazon Seller SKU",
-    "FC",
-    "Current FC Stock",
-    "Uniware Stock",
-    "30D Sale",
-    "DRR",
-    "Stock Cover",
-    "Decision",
-    "Send Qty",
-    "Recall Qty",
-    "Remarks"
-  ];
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = parseCSV(reader.result);
+      validateHeaders(parsed.headers, REQUIRED_HEADERS[type]);
+      state[type] = parsed;
 
-  let csv = headers.join(",") + "\n";
-
-  rows.forEach(r => {
-    csv += [
-      r.sku,
-      r.fc,
-      r.stock,
-      r.uw,
-      r.sale,
-      r.drr.toFixed(2),
-      r.sc.toFixed(1),
-      r.decision,
-      r.send,
-      r.recall,
-      r.remarks
-    ].join(",") + "\n";
-  });
-
-  downloadCSV(csv, `amazon_${type}_export.csv`);
+      statusEl.textContent = "Validated";
+      statusEl.className = "status valid";
+      log(type.toUpperCase() + " validated");
+    } catch (err) {
+      state[type] = null;
+      statusEl.textContent = err.message;
+      statusEl.className = "status error";
+      log(err.message);
+    }
+    checkReady();
+  };
+  reader.readAsText(file);
 }
 
-// ==================================================
-function downloadCSV(content, filename) {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
+// ================= LOAD SKU MAPPING =================
+fetch("data/sku_mapping.csv")
+  .then(r => r.text())
+  .then(t => {
+    const parsed = parseCSV(t);
+    validateHeaders(parsed.headers, REQUIRED_HEADERS.mapping);
+    state.mapping = parsed;
+    log("SKU Mapping loaded");
+    checkReady();
+  })
+  .catch(err => log("Mapping load failed: " + err.message));
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
+// ================= CSV PARSER =================
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/, "").trim();
+  const lines = text.split(/\r?\n/);
+  const d = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
 
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const headers = lines[0].split(d).map(h => normalize(h));
+  const rows = lines.slice(1).map(l => l.split(d).map(c => normalize(c)));
+
+  const index = {};
+  headers.forEach((h,i) => index[h] = i);
+
+  return { headers, rows, index };
+}
+
+function normalize(v){
+  return v.replace(/^"|"$/g,"").replace(/^\uFEFF/,"").trim();
+}
+
+// ================= VALIDATION =================
+function validateHeaders(headers, required){
+  required.forEach(h => {
+    if (!headers.includes(h)) {
+      throw new Error("Missing header: " + h);
+    }
+  });
+}
+
+// ================= READY CHECK =================
+function checkReady(){
+  document.getElementById("generateBtn").disabled = !(
+    state.sale && state.fba && state.uniware && state.mapping
+  );
+}
+
+// ================= PLACEHOLDER (UNCHANGED LOGIC BELOW) =================
+function generateReport(){
+  log("Generate Report clicked");
+}
+
+// ================= LOG =================
+function log(msg){
+  document.getElementById("logBox").textContent += msg + "\n";
 }
