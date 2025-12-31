@@ -33,12 +33,12 @@ const REQUIRED_HEADERS = {
   ]
 };
 
-// ================= FILE HANDLERS =================
+// ================= FILE INPUT HANDLERS =================
 document.getElementById("saleFile").addEventListener("change", e => handleFile(e, "sale"));
 document.getElementById("fbaFile").addEventListener("change", e => handleFile(e, "fba"));
 document.getElementById("uniwareFile").addEventListener("change", e => handleFile(e, "uniware"));
-document.getElementById("mappingFile").addEventListener("change", e => handleFile(e, "mapping"));
 
+// ================= HANDLE FILE =================
 function handleFile(event, type) {
   const file = event.target.files[0];
   const statusEl = document.getElementById(type + "Status");
@@ -53,7 +53,7 @@ function handleFile(event, type) {
       state[type] = rows;
       statusEl.textContent = "Validated";
       statusEl.className = "status valid";
-      log(`${type.toUpperCase()} file validated successfully`);
+      log(`${type.toUpperCase()} file validated`);
       checkAllValidated();
     } catch (err) {
       statusEl.textContent = err.message;
@@ -64,6 +64,23 @@ function handleFile(event, type) {
   };
   reader.readAsText(file);
 }
+
+// ================= LOAD SKU MAPPING FROM GITHUB =================
+fetch("data/sku_mapping.csv")
+  .then(res => {
+    if (!res.ok) throw new Error("Failed to load sku_mapping.csv");
+    return res.text();
+  })
+  .then(text => {
+    const rows = parseCSV(text);
+    validateHeaders(rows[0], REQUIRED_HEADERS.mapping);
+    state.mapping = rows;
+    log("SKU Mapping loaded & validated");
+    checkAllValidated();
+  })
+  .catch(err => {
+    log("SKU Mapping error: " + err.message);
+  });
 
 // ================= CSV PARSER =================
 function parseCSV(text) {
@@ -84,18 +101,16 @@ function validateHeaders(headers, required) {
 
 // ================= FINAL VALIDATION =================
 function checkAllValidated() {
-  const allValid =
+  const ready =
     state.sale &&
     state.fba &&
     state.uniware &&
     state.mapping;
 
-  document.getElementById("generateBtn").disabled = !allValid;
+  document.getElementById("generateBtn").disabled = !ready;
 }
 
 // ================= LOG =================
 function log(msg) {
-  const box = document.getElementById("logBox");
-  box.textContent += msg + "\n";
+  document.getElementById("logBox").textContent += msg + "\n";
 }
-
