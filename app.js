@@ -9,77 +9,72 @@ const state = {
 
 // ================= REQUIRED HEADERS =================
 const REQUIRED_HEADERS = {
-  sale: ["Transaction Type","Sku","Quantity","Warehouse Id"],
+  sale: ["Transaction Type","Sku","Quantity","Warehouse Id","Fulfillment Channel"],
   fba: ["Date","MSKU","Disposition","Ending Warehouse Balance","Location"],
   uniware: ["Sku Code","Total Inventory"],
   mapping: ["Amazon Seller SKU","Uniware SKU"]
 };
 
 // ================= EVENTS =================
-document.getElementById("saleFile").addEventListener("change", e => loadFile(e,"sale"));
-document.getElementById("fbaFile").addEventListener("change", e => loadFile(e,"fba"));
-document.getElementById("uniwareFile").addEventListener("change", e => loadFile(e,"uniware"));
+["sale","fba","uniware"].forEach(t=>{
+  document.getElementById(t+"File").addEventListener("change",e=>loadFile(e,t));
+});
 document.getElementById("generateBtn").addEventListener("click", generateReport);
 
-// ================= LOAD FILE =================
+// ================= FILE LOAD =================
 function loadFile(e,type){
-  const file = e.target.files[0];
-  const statusEl = document.getElementById(type+"Status");
-  if (!file) return;
+  const file=e.target.files[0];
+  const status=document.getElementById(type+"Status");
+  if(!file) return;
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const parsed = parseCSV(reader.result);
-      validateHeaders(parsed.headers, REQUIRED_HEADERS[type]);
-      state[type] = parsed;
-      statusEl.textContent = "Validated";
-      statusEl.className = "status valid";
-      log(type.toUpperCase() + " validated");
-    } catch (err) {
-      state[type] = null;
-      statusEl.textContent = err.message;
-      statusEl.className = "status error";
-      log(err.message);
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const p=parseCSV(r.result);
+      validateHeaders(p.headers,REQUIRED_HEADERS[type]);
+      state[type]=p;
+      status.textContent="Validated";
+      status.className="status valid";
+    }catch(err){
+      state[type]=null;
+      status.textContent=err.message;
+      status.className="status error";
     }
     checkReady();
   };
-  reader.readAsText(file);
+  r.readAsText(file);
 }
 
 // ================= SKU MAP =================
-fetch("data/sku_mapping.csv")
-  .then(r=>r.text())
-  .then(t=>{
-    const p=parseCSV(t);
-    validateHeaders(p.headers, REQUIRED_HEADERS.mapping);
-    state.mapping=p;
-    log("SKU Mapping loaded");
-    checkReady();
-  });
+fetch("data/sku_mapping.csv").then(r=>r.text()).then(t=>{
+  const p=parseCSV(t);
+  validateHeaders(p.headers,REQUIRED_HEADERS.mapping);
+  state.mapping=p;
+  checkReady();
+});
 
 // ================= CSV =================
 function parseCSV(text){
   text=text.replace(/^\uFEFF/,"").trim();
   const lines=text.split(/\r?\n/);
-  const d=lines[0].includes("\t")?"\t":lines[0].includes(";")?";":",";
-  const headers=lines[0].split(d).map(h=>normalize(h));
-  const rows=lines.slice(1).map(l=>l.split(d).map(c=>normalize(c)));
+  const d=lines[0].includes("\t")?"\t":",";
+  const headers=lines[0].split(d).map(h=>h.trim());
+  const rows=lines.slice(1).map(l=>l.split(d).map(c=>c.trim()));
   const index={}; headers.forEach((h,i)=>index[h]=i);
   return {headers,rows,index};
 }
-function normalize(v){return v.replace(/^"|"$/g,"").replace(/^\uFEFF/,"").trim();}
+
 function validateHeaders(h,r){r.forEach(x=>{if(!h.includes(x))throw Error("Missing header: "+x);});}
 function checkReady(){
-  document.getElementById("generateBtn").disabled = !(
+  document.getElementById("generateBtn").disabled=!(
     state.sale && state.fba && state.uniware && state.mapping
   );
 }
 
-// ================= REPORT PIPELINE =================
+// ================= REPORT =================
 function generateReport(){
   state.working=[];
-  const skuMap={}, uniwareStock={}, sales={}, returns={}, fba={};
+  const skuMap={}, uniware={}, sales={}, returns={}, fba={};
 
   state.mapping.rows.forEach(r=>{
     skuMap[r[state.mapping.index["Amazon Seller SKU"]]] =
@@ -87,20 +82,26 @@ function generateReport(){
   });
 
   state.uniware.rows.forEach(r=>{
-    uniwareStock[r[state.uniware.index["Sku Code"]]] =
+    uniware[r[state.uniware.index["Sku Code"]]] =
       Number(r[state.uniware.index["Total Inventory"]])||0;
   });
 
+  // SALES (ignore Cancel)
   state.sale.rows.forEach(r=>{
     const txn=r[state.sale.index["Transaction Type"]];
+    if(txn.startsWith("Cancel")) return;
+
     const sku=r[state.sale.index["Sku"]];
     const qty=Number(r[state.sale.index["Quantity"]])||0;
-    const fc=r[state.sale.index["Warehouse Id"]];
-    const k=sku+"||"+fc;
-    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement")) sales[k]=(sales[k]||0)+qty;
-    if(txn.startsWith("Refund")) returns[k]=(returns[k]||0)+qty;
+    const fc=r[state.sale.index["Warehouse Id"]]||"";
+    const channel=r[state.sale.index["Fulfillment Channel"]];
+    const key=sku+"||"+fc+"||"+channel;
+
+    if(txn.startsWith("Shipment")||txn.startsWith("FreeReplacement")) sales[key]=(sales[key]||0)+qty;
+    if(txn.startsWith("Refund")) returns[key]=(returns[key]||0)+qty;
   });
 
+  // FBA
   const parseDate=d=>{const[a,b,c]=d.split("-");return new Date(`${c}-${b}-${a}`).getTime();};
   const f=state.fba;
   const latest=Math.max(...f.rows.map(r=>parseDate(r[f.index["Date"]])));
@@ -110,153 +111,121 @@ function generateReport(){
     if(r[f.index["Disposition"]]!=="SELLABLE") return;
     const sku=r[f.index["MSKU"]];
     const fc=r[f.index["Location"]];
-    const k=sku+"||"+fc;
-    fba[k]=(fba[k]||0)+(Number(r[f.index["Ending Warehouse Balance"]])||0);
+    const key=sku+"||"+fc+"||AFN";
+    fba[key]=(fba[key]||0)+(Number(r[f.index["Ending Warehouse Balance"]])||0);
   });
 
   const keys=new Set([...Object.keys(sales),...Object.keys(returns),...Object.keys(fba)]);
   keys.forEach(k=>{
-    const [sku,fc]=k.split("||");
+    const [sku,fc,channel]=k.split("||");
+    if(channel!=="MFN" && !fc) return;
+
     const sale=sales[k]||0;
     const ret=returns[k]||0;
     const stock=fba[k]||0;
-    if(!sale&&!stock) return;
+    if(!sale && !stock) return;
 
     const drr=sale/30;
+    const target=45*drr;
     const sc=drr?stock/drr:0;
-    const rp=sale+ret?ret/(sale+ret)*100:0;
-    const uw=uniwareStock[skuMap[sku]]||0;
+    const uw=uniware[skuMap[sku]]||0;
 
-    let decision="DISCUSS",send=0,recall=0,remarks="";
-    if(sc<45&&uw>=45&&rp<=30){
-      decision="SEND";
-      send=Math.ceil(45*drr-stock);
-      remarks="Low stock cover";
-    }else{
-      decision="DO NOT SEND";
-      if(sc>45||rp>30){
-        recall=Math.max(0,Math.floor(stock-(45*drr)));
-        remarks="Overstock / Returns";
-      }else remarks="Uniware constraint";
+    let send=0, recall=0, decision="DISCUSS";
+    if(sc<45){
+      send=Math.max(0,Math.ceil(target-stock));
+      decision=send>0?"SEND":"DISCUSS";
+    }else if(sc>45){
+      recall=Math.max(0,Math.floor(stock-target));
+      decision=recall>0?"DO NOT SEND":"DISCUSS";
     }
 
-    state.working.push({sku,fc,stock,uw,sale,drr,sc,decision,send,recall,remarks});
+    state.working.push({
+      sku, fc:fc||"Seller", channel,
+      stock, uw, sale,
+      drr, sc, send, recall, decision
+    });
   });
 
-  renderFCTabs();
+  renderSections();
 }
 
 // ================= RENDER =================
-function renderFCTabs(){
-  const tabs=document.getElementById("fcTabs");
-  const content=document.getElementById("fcContent");
-  tabs.innerHTML=""; content.innerHTML="";
+function renderSections(){
+  const afn={}, mfn={ XHNF:[], QWZ8:[], Seller:[] };
 
-  const groups={};
   state.working.forEach(r=>{
-    groups[r.fc]=groups[r.fc]||[];
-    groups[r.fc].push(r);
+    if(r.channel==="MFN"){
+      mfn[r.fc] = mfn[r.fc] || [];
+      mfn[r.fc].push(r);
+    }else{
+      afn[r.fc] = afn[r.fc] || [];
+      afn[r.fc].push(r);
+    }
   });
 
-  Object.keys(groups).forEach((fc,i)=>{
+  renderTabs("afnTabs","afnContent",afn);
+  renderTabs("mfnTabs","mfnContent",mfn);
+}
+
+function renderTabs(tabId,contentId,groups){
+  const tabs=document.getElementById(tabId);
+  const content=document.getElementById(contentId);
+  tabs.innerHTML=""; content.innerHTML="";
+
+  const fcs=Object.keys(groups);
+  if(!fcs.length) return;
+
+  fcs.forEach((fc,i)=>{
     const t=document.createElement("div");
-    t.className="fc-tab"+(i===0?" active":"");
+    t.className="tab"+(i===0?" active":"");
     t.textContent=fc;
-    t.onclick=()=>showFC(fc,groups);
+    t.onclick=()=>showTable(fc,groups,tabId,contentId);
     tabs.appendChild(t);
   });
 
-  showFC(Object.keys(groups)[0],groups);
+  showTable(fcs[0],groups,tabId,contentId);
 }
 
-function showFC(fc,groups){
-  document.querySelectorAll(".fc-tab").forEach(t=>{
+function showTable(fc,groups,tabId,contentId){
+  document.querySelectorAll(`#${tabId} .tab`).forEach(t=>{
     t.classList.toggle("active",t.textContent===fc);
   });
-
   const rows=groups[fc];
-  let limit=25;
-  const c=document.getElementById("fcContent");
-
-  const summary = buildSummary(rows);
-
-  const render=()=>{
-    c.innerHTML = summary + buildTable(rows.slice(0,limit));
-    if(limit<rows.length){
-      const b=document.createElement("button");
-      b.textContent="Load More";
-      b.className="load-btn";
-      b.onclick=()=>{limit+=25;render();};
-      c.appendChild(b);
-    }
-  };
-  render();
+  document.getElementById(contentId).innerHTML=buildSummary(rows)+buildTable(rows);
 }
 
-// ================= SUMMARY =================
 function buildSummary(rows){
-  const totalStock = rows.reduce((a,r)=>a+r.stock,0);
-  const totalUW = rows.reduce((a,r)=>a+r.uw,0);
-  const totalSale = rows.reduce((a,r)=>a+r.sale,0);
-  const totalSend = rows.reduce((a,r)=>a+r.send,0);
-  const totalRecall = rows.reduce((a,r)=>a+r.recall,0);
-
-  const drr = totalSale/30;
-  const sc = drr ? totalStock/drr : 0;
+  const sum=(k)=>rows.reduce((a,r)=>a+(r[k]||0),0);
+  const sale=sum("sale"), stock=sum("stock");
+  const drr=sale/30;
+  const sc=drr?stock/drr:0;
 
   return `
   <table class="summary-table">
     <tr>
-      <th>Current FC Stock</th>
-      <th>Uniware Stock</th>
-      <th>30D Sale</th>
-      <th>DRR</th>
-      <th>Stock Cover</th>
-      <th>SEND QTY</th>
-      <th>RECALL QTY</th>
+      <th>Current FC Stock</th><th>Uniware Stock</th><th>30D Sale</th>
+      <th>DRR</th><th>Stock Cover</th><th>SEND QTY</th><th>RECALL QTY</th>
     </tr>
     <tr>
-      <td>${totalStock}</td>
-      <td>${totalUW}</td>
-      <td>${totalSale}</td>
-      <td>${drr.toFixed(2)}</td>
-      <td>${sc.toFixed(1)}</td>
-      <td>${totalSend}</td>
-      <td>${totalRecall}</td>
+      <td>${stock}</td><td>${sum("uw")}</td><td>${sale}</td>
+      <td>${drr.toFixed(2)}</td><td>${sc.toFixed(1)}</td>
+      <td>${sum("send")}</td><td>${sum("recall")}</td>
     </tr>
   </table>`;
 }
 
 function buildTable(rows){
   let h=`<table><tr>
-    <th>Amazon Seller SKU</th>
-    <th>Current FC Stock</th>
-    <th>Uniware Stock</th>
-    <th>30D Sale</th>
-    <th>DRR</th>
-    <th>Stock Cover</th>
-    <th>Decision</th>
-    <th>Send Qty</th>
-    <th>Recall Qty</th>
-    <th>Remarks</th>
+    <th>Amazon Seller SKU</th><th>Current FC Stock</th><th>Uniware Stock</th>
+    <th>30D Sale</th><th>DRR</th><th>Stock Cover</th>
+    <th>Decision</th><th>Send Qty</th><th>Recall Qty</th>
   </tr>`;
   rows.forEach(r=>{
     h+=`<tr>
-      <td>${r.sku}</td>
-      <td>${r.stock}</td>
-      <td>${r.uw}</td>
-      <td>${r.sale}</td>
-      <td>${r.drr.toFixed(2)}</td>
-      <td>${r.sc.toFixed(1)}</td>
-      <td>${r.decision}</td>
-      <td>${r.send}</td>
-      <td>${r.recall}</td>
-      <td>${r.remarks}</td>
+      <td>${r.sku}</td><td>${r.stock}</td><td>${r.uw}</td>
+      <td>${r.sale}</td><td>${r.drr.toFixed(2)}</td><td>${r.sc.toFixed(1)}</td>
+      <td>${r.decision}</td><td>${r.send}</td><td>${r.recall}</td>
     </tr>`;
   });
   return h+"</table>";
-}
-
-function log(m){
-  document.getElementById("logBox").textContent += m + "\n";
 }
