@@ -6,7 +6,7 @@ const state = {
   mapping: null
 };
 
-// ================= REQUIRED HEADERS =================
+// ================= REQUIRED HEADERS (LOCKED) =================
 const REQUIRED_HEADERS = {
   sale: [
     "Transaction Type",
@@ -49,7 +49,8 @@ function handleFile(event, type) {
   reader.onload = () => {
     try {
       const rows = parseCSV(reader.result);
-      validateHeaders(rows[0], REQUIRED_HEADERS[type]);
+      const headers = normalizeHeaders(rows[0]);
+      validateHeaders(headers, REQUIRED_HEADERS[type]);
       state[type] = rows;
       statusEl.textContent = "Validated";
       statusEl.className = "status valid";
@@ -65,7 +66,7 @@ function handleFile(event, type) {
   reader.readAsText(file);
 }
 
-// ================= LOAD SKU MAPPING FROM GITHUB =================
+// ================= LOAD SKU MAPPING =================
 fetch("data/sku_mapping.csv")
   .then(res => {
     if (!res.ok) throw new Error("Failed to load sku_mapping.csv");
@@ -73,7 +74,8 @@ fetch("data/sku_mapping.csv")
   })
   .then(text => {
     const rows = parseCSV(text);
-    validateHeaders(rows[0], REQUIRED_HEADERS.mapping);
+    const headers = normalizeHeaders(rows[0]);
+    validateHeaders(headers, REQUIRED_HEADERS.mapping);
     state.mapping = rows;
     log("SKU Mapping loaded & validated");
     checkAllValidated();
@@ -84,9 +86,21 @@ fetch("data/sku_mapping.csv")
 
 // ================= CSV PARSER =================
 function parseCSV(text) {
-  const lines = text.trim().split("\n");
-  return lines.map(line =>
-    line.split(",").map(cell => cell.replace(/^"|"$/g, "").trim())
+  return text
+    .replace(/^\uFEFF/, "") // remove BOM
+    .trim()
+    .split("\n")
+    .map(line =>
+      line.split(",").map(cell =>
+        cell.replace(/^"|"$/g, "").trim()
+      )
+    );
+}
+
+// ================= HEADER NORMALIZATION =================
+function normalizeHeaders(headers) {
+  return headers.map(h =>
+    h.replace(/^\uFEFF/, "").trim()
   );
 }
 
