@@ -68,6 +68,5 @@ button:disabled {
 #logBox {
   margin-top: 25px;
   font-size: 13px;
-  color: #333;
   white-space: pre-wrap;
 }
