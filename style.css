@@ -67,6 +67,11 @@ button {
   color: #fff;
 }
 
+.summary-table {
+  margin-bottom: 12px;
+  background: #f9fafb;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
